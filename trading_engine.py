@@ -76,8 +76,9 @@ class TradingEngine:
         self.trades: List[Trade] = []
         self.open_trades: Dict[str, Trade] = {}
         self.daily_trades_count = 0
-        self.daily_loss = 0.0
+        self.daily_losing_trades = 0  # Track number of losing trades
         self.trade_counter = 0
+        self.trading_stopped_today = False
 
     def is_valid_market(self, market: Dict) -> bool:
         """Check if market meets trading criteria."""
@@ -127,8 +128,12 @@ class TradingEngine:
             logger.warning("Max trades per day reached")
             return None
 
-        if self.daily_loss >= (self.balance * Config.MAX_DAILY_LOSS_PERCENT / 100):
-            logger.warning("Daily loss limit exceeded, stopping trades")
+        if self.daily_losing_trades >= Config.MAX_LOSING_TRADES_PER_DAY:
+            logger.warning(
+                f"Daily losing trade limit reached ({self.daily_losing_trades}/{Config.MAX_LOSING_TRADES_PER_DAY}). "
+                "Stopping trades for the day."
+            )
+            self.trading_stopped_today = True
             return None
 
         self.trade_counter += 1
@@ -176,7 +181,17 @@ class TradingEngine:
         """Close a trade at given price."""
         trade.close(exit_price)
         self.balance += trade.profit_loss
-        self.daily_loss += trade.profit_loss if trade.profit_loss < 0 else 0
+
+        # Track losing trades
+        if trade.profit_loss < 0:
+            self.daily_losing_trades += 1
+            logger.info(
+                f"Losing trade #{self.daily_losing_trades} - "
+                f"Loss: ${trade.profit_loss:.2f} "
+                f"({Config.MAX_LOSING_TRADES_PER_DAY - self.daily_losing_trades} remaining before stop)"
+            )
+        else:
+            logger.info(f"Winning trade - Profit: ${trade.profit_loss:.2f}")
 
         # Cancel order on Polymarket if still open
         self.client.cancel_order(trade.market_id)
@@ -199,6 +214,9 @@ class TradingEngine:
             "total_trades": len(closed_trades),
             "winning_trades": len(winning_trades),
             "losing_trades": len(losing_trades),
+            "daily_losing_trades": self.daily_losing_trades,
+            "max_losing_trades_allowed": Config.MAX_LOSING_TRADES_PER_DAY,
+            "trading_stopped": self.trading_stopped_today,
             "win_rate": win_rate,
             "total_profit": total_profit,
             "current_balance": self.balance,
@@ -208,4 +226,5 @@ class TradingEngine:
     def reset_daily_stats(self):
         """Reset daily counters."""
         self.daily_trades_count = 0
-        self.daily_loss = 0.0
+        self.daily_losing_trades = 0
+        self.trading_stopped_today = False

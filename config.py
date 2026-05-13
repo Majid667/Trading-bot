@@ -22,7 +22,7 @@ class Config:
     TIMEFRAME = "5m"
 
     # Risk Management
-    MAX_DAILY_LOSS_PERCENT = 5.0  # Stop trading if down 5% for the day
+    MAX_LOSING_TRADES_PER_DAY = 3  # Stop trading after 3 losing trades
     MIN_SPREAD_PERCENT = 0.5  # Only trade if spread > 0.5%
 
     # Trading Hours
