@@ -46,8 +46,18 @@ class BotManager:
     async def scan_and_trade(self):
         """Main trading loop - scan markets and execute trades."""
         iteration = 0
+        last_reset_date = datetime.now().date()
+
         while self.is_running:
             iteration += 1
+            current_date = datetime.now().date()
+
+            # Reset daily stats if it's a new day
+            if current_date != last_reset_date:
+                self.engine.reset_daily_stats()
+                logger.info(f"Daily reset: New day ({current_date}). Ready to trade!")
+                last_reset_date = current_date
+
             logger.info(f"--- Iteration {iteration} ---")
 
             # 1. Check if we should trade (based on time/conditions)
@@ -56,7 +66,16 @@ class BotManager:
                 await asyncio.sleep(5)
                 continue
 
-            # 2. Find trading opportunities
+            # 2. Check if trading was stopped for today
+            if self.engine.trading_stopped_today:
+                logger.warning(
+                    f"Trading stopped for today - Lost 3 trades. "
+                    f"Come back tomorrow! (Losing trades: {self.engine.daily_losing_trades}/3)"
+                )
+                await asyncio.sleep(30)  # Wait longer between checks
+                continue
+
+            # 3. Find trading opportunities
             opportunities = self.engine.find_trading_opportunities()
             if not opportunities:
                 logger.info("No trading opportunities found")
@@ -65,7 +84,7 @@ class BotManager:
 
             logger.info(f"Found {len(opportunities)} potential opportunities")
 
-            # 3. Analyze and enter trades
+            # 4. Analyze and enter trades
             for market in opportunities:
                 if self.engine.daily_trades_count >= Config.MAX_TRADES_PER_DAY:
                     logger.warning("Daily trade limit reached")
@@ -76,8 +95,15 @@ class BotManager:
                     trade = self.engine.enter_trade(signal)
                     if trade:
                         logger.info(f"✓ Entered {trade.trade_id}")
+                    else:
+                        # Check if stopped due to losing trades
+                        if self.engine.trading_stopped_today:
+                            logger.warning(
+                                f"Trading stopped - Reached 3 losing trades today"
+                            )
+                            break
 
-            # 4. Monitor open trades
+            # 5. Monitor open trades
             trades_to_remove = []
             for trade_id, trade in self.engine.open_trades.items():
                 # Get current market price
@@ -91,11 +117,12 @@ class BotManager:
                             f"✓ {trade_id} closed - Profit/Loss: ${trade.profit_loss:.2f}"
                         )
 
-            # 5. Update balance and log status
+            # 6. Update balance and log status
             stats = self.engine.get_daily_stats()
             logger.info(
                 f"Balance: ${stats['current_balance']:.2f} | "
                 f"Trades: {stats['total_trades']} | "
+                f"Losing Trades: {stats['daily_losing_trades']}/{stats['max_losing_trades_allowed']} | "
                 f"Win Rate: {stats['win_rate']:.1f}% | "
                 f"P&L: ${stats['total_profit']:.2f}"
             )
@@ -121,6 +148,7 @@ class BotManager:
         logger.info(f"Position Size: {Config.POSITION_SIZE_PERCENT}%")
         logger.info(f"Profit Target: {Config.PROFIT_TARGET_PERCENT}%")
         logger.info(f"Stop Loss: {Config.STOP_LOSS_PERCENT}%")
+        logger.info(f"Max Losing Trades/Day: {Config.MAX_LOSING_TRADES_PER_DAY}")
 
         self.is_running = True
 
